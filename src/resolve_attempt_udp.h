@@ -2,7 +2,9 @@
 #define RESOLVE_ATTEMPT_UDP_H
 
 #include "cancellation.h"
+#include "netinterfaces.h"
 #include "stream_info_impl.h"
+#include <boost/asio/ip/multicast.hpp>
 #include <boost/asio/ip/udp.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <map>
@@ -20,6 +22,8 @@ namespace lsl {
 
 /// A container for resolve results (map from stream instance UID onto (stream_info,receive-time)).
 typedef std::map<std::string, std::pair<stream_info_impl, double>> result_container;
+/// A container for outgoing multicast interfaces
+typedef std::vector<class netif> mcast_interface_list;
 
 /**
  * An asynchronous resolve attempt for a single query targeted at a set of endpoints, via UDP.
@@ -78,7 +82,8 @@ private:
 	void receive_next_result();
 
 	/// Thos function starts an async send operation for the given current endpoint.
-	void send_next_query(endpoint_list::const_iterator i);
+	void send_next_query(
+		endpoint_list::const_iterator next, mcast_interface_list::const_iterator mcit);
 
 	/// Handler that gets called when a receive has completed.
 	void handle_receive_outcome(error_code err, std::size_t len);
@@ -124,6 +129,8 @@ private:
 	udp::socket broadcast_socket_;
 	/// socket to send data over (for multicasts)
 	udp::socket multicast_socket_;
+	/// Interface addresses to send multicast packets from
+	const mcast_interface_list &multicast_interfaces;
 	/// socket to receive replies (always unicast)
 	udp::socket recv_socket_;
 	/// timer to schedule the cancel action

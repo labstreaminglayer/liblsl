@@ -1,4 +1,5 @@
 #include "api_config.h"
+#include "cast.h"
 #include "common.h"
 #include "inireader.h"
 #include <algorithm>
@@ -8,7 +9,7 @@
 #include <mutex>
 #include <stdexcept>
 
-using namespace lsl;
+namespace lsl {
 
 /// Substitute the "~" character by the full home directory (according to environment variables).
 std::string expand_tilde(const std::string &filename) {
@@ -147,32 +148,29 @@ void api_config::load_from_file(const std::string &filename) {
 		else
 			throw std::runtime_error("This ResolveScope setting is unsupported.");
 
-		multicast_addresses_.insert(
-			multicast_addresses_.end(), machine_group.begin(), machine_group.end());
+		std::vector<std::string> mcasttmp;
+
+		mcasttmp.insert(mcasttmp.end(), machine_group.begin(), machine_group.end());
 		multicast_ttl_ = 0;
 
 		if (scope >= link) {
-			multicast_addresses_.insert(
-				multicast_addresses_.end(), link_group.begin(), link_group.end());
-			multicast_addresses_.push_back("FF02:" + ipv6_multicast_group);
+			mcasttmp.insert(mcasttmp.end(), link_group.begin(), link_group.end());
+			mcasttmp.push_back("FF02:" + ipv6_multicast_group);
 			multicast_ttl_ = 1;
 		}
 		if (scope >= site) {
-			multicast_addresses_.insert(
-				multicast_addresses_.end(), site_group.begin(), site_group.end());
-			multicast_addresses_.push_back("FF05:" + ipv6_multicast_group);
+			mcasttmp.insert(mcasttmp.end(), site_group.begin(), site_group.end());
+			mcasttmp.push_back("FF05:" + ipv6_multicast_group);
 			multicast_ttl_ = 24;
 		}
 		if (scope >= organization) {
-			multicast_addresses_.insert(
-				multicast_addresses_.end(), organization_group.begin(), organization_group.end());
-			multicast_addresses_.push_back("FF08:" + ipv6_multicast_group);
+			mcasttmp.insert(mcasttmp.end(), organization_group.begin(), organization_group.end());
+			mcasttmp.push_back("FF08:" + ipv6_multicast_group);
 			multicast_ttl_ = 32;
 		}
 		if (scope >= global) {
-			multicast_addresses_.insert(
-				multicast_addresses_.end(), global_group.begin(), global_group.end());
-			multicast_addresses_.push_back("FF0E:" + ipv6_multicast_group);
+			mcasttmp.insert(mcasttmp.end(), global_group.begin(), global_group.end());
+			mcasttmp.push_back("FF0E:" + ipv6_multicast_group);
 			multicast_ttl_ = 255;
 		}
 
@@ -181,7 +179,45 @@ void api_config::load_from_file(const std::string &filename) {
 		std::vector<std::string> address_override =
 			parse_set(pt.get("multicast.AddressesOverride", "{}"));
 		if (ttl_override >= 0) multicast_ttl_ = ttl_override;
-		if (!address_override.empty()) multicast_addresses_ = address_override;
+		if (!address_override.empty()) mcasttmp = address_override;
+
+		// Parse, validate and store multicast addresses
+		for (std::vector<std::string>::iterator it = mcasttmp.begin(); it != mcasttmp.end(); ++it) {
+			ip::address addr = ip::make_address(*it);
+			if ((addr.is_v4() && allow_ipv4_) || (addr.is_v6() && allow_ipv6_))
+				multicast_addresses_.push_back(addr);
+		}
+
+		// The network stack requires the source interfaces for multicast packets to be
+		// specified as IPv4 address or an IPv6 interface index
+		// Try getting the interfaces from the configuration files
+		using namespace lslboost::asio::ip;
+		std::vector<std::string> netifs = parse_set(pt.get("multicast.Interfaces", "{}"));
+		for (const auto &netifstr : netifs) {
+			netif if_;
+			if_.name = std::string("Configured in lslapi.cfg");
+			if_.addr = make_address(netifstr);
+			if (if_.addr.is_v6()) if_.ifindex = if_.addr.to_v6().scope_id();
+			multicast_interfaces.push_back(if_);
+		}
+		// Try getting the interfaces from the OS
+		if (multicast_interfaces.empty()) multicast_interfaces = get_local_interfaces();
+
+		// Otherwise, let the OS select an appropriate network interface
+		if (multicast_interfaces.empty()) {
+			LOG_F(ERROR,
+				"No local network interface addresses found, resolving streams will likely "
+				"only work for devices connected to the main network adapter\n");
+			// Add dummy interface with default settings
+			netif dummy;
+			dummy.name = "Dummy interface";
+			dummy.addr = address_v4::any();
+			multicast_interfaces.push_back(dummy);
+			dummy.name = "IPv6 dummy interface";
+			dummy.addr = address_v6::any();
+			multicast_interfaces.push_back(dummy);
+		}
+
 
 		// read the [lab] settings
 		known_peers_ = parse_set(pt.get("lab.KnownPeers", "{}"));
@@ -208,11 +244,11 @@ void api_config::load_from_file(const std::string &filename) {
 		outlet_buffer_reserve_samples_ = pt.get("tuning.OutletBufferReserveSamples", 128);
 		inlet_buffer_reserve_ms_ = pt.get("tuning.InletBufferReserveMs", 5000);
 		inlet_buffer_reserve_samples_ = pt.get("tuning.InletBufferReserveSamples", 128);
-		smoothing_halftime_ = pt.get("tuning.SmoothingHalftime", 90.0f);
+		smoothing_halftime_ = pt.get("tuning.SmoothingHalftime", 90.0F);
 		force_default_timestamps_ = pt.get("tuning.ForceDefaultTimestamps", false);
 
 		// read the [log] settings
-		int log_level = pt.get("log.level", (int) loguru::Verbosity_INFO);
+		int log_level = pt.get("log.level", (int)loguru::Verbosity_INFO);
 		if (log_level < -3 || log_level > 9)
 			throw std::runtime_error("Invalid log.level (valid range: -3 to 9");
 
@@ -250,4 +286,6 @@ const api_config *api_config::get_instance() {
 api_config *api_config::get_instance_internal() {
 	static api_config cfg;
 	return &cfg;
+}
+
 }

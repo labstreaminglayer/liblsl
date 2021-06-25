@@ -23,7 +23,7 @@ resolver_impl::resolver_impl()
 	uint16_t mcast_port = cfg_->multicast_port();
 	for (const auto &mcast_addr : cfg_->multicast_addresses()) {
 		try {
-			mcast_endpoints_.emplace_back(ip::make_address(mcast_addr), (uint16_t)mcast_port);
+			mcast_endpoints_.emplace_back(mcast_addr, mcast_port);
 		} catch (std::exception &) {}
 	}
 
@@ -34,7 +34,7 @@ resolver_impl::resolver_impl()
 		try {
 			// resolve the name
 			// for each endpoint...
-			for (auto &res : udp_resolver.resolve(peer, std::to_string(cfg_->base_port()))) {
+			for (const auto &res : udp_resolver.resolve(peer, std::to_string(cfg_->base_port()))) {
 				// for each port in the range...
 				for (int p = cfg_->base_port(); p < cfg_->base_port() + cfg_->port_range(); p++)
 					// add a record

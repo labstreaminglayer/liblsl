@@ -76,16 +76,15 @@ void stream_outlet_impl::instantiate_stack(tcp tcp_protocol, udp udp_protocol) {
 	ios_.push_back(std::make_shared<asio::io_context>());
 	udp_servers_.push_back(std::make_shared<udp_server>(info_, *ios_.back(), udp_protocol));
 	// create UDP multicast responders
-	for (const auto &mcastaddr : cfg->multicast_addresses()) {
+	for (const auto &address : cfg->multicast_addresses()) {
 		try {
 			// use only addresses for the protocol that we're supposed to use here
-			auto address = asio::ip::make_address(mcastaddr);
 			if (udp_protocol == udp::v4() ? address.is_v4() : address.is_v6())
 				responders_.push_back(std::make_shared<udp_server>(
-					info_, *ios_.back(), mcastaddr, multicast_port, multicast_ttl, listen_address));
+					info_, *ios_.back(), address, multicast_port, multicast_ttl, listen_address));
 		} catch (std::exception &e) {
-			LOG_F(WARNING, "Couldn't create multicast responder for %s (%s)", mcastaddr.c_str(),
-				e.what());
+			LOG_F(WARNING, "Couldn't create multicast responder for %s (%s)",
+				address.to_string().c_str(), e.what());
 		}
 	}
 }
@@ -128,7 +127,7 @@ stream_outlet_impl::~stream_outlet_impl() {
 
 			std::this_thread::sleep_for(std::chrono::milliseconds(25));
 			if (std::all_of(io_threads_.begin(), io_threads_.end(),
-					[](thread_p thread) { return thread->joinable(); })) {
+					[](const thread_p &thread) { return thread->joinable(); })) {
 				for (auto &thread : io_threads_) thread->join();
 				DLOG_F(INFO, "All of %s's IO threads were joined succesfully", name);
 				break;
